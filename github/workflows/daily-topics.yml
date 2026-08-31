@@ -30,11 +30,10 @@ jobs:
           TWITTER_BEARER_TOKEN: ${{ secrets.TWITTER_BEARER_TOKEN }}
         run: python collect_topics.py
 
-            - name: Commit updated topics
+      - name: Commit updated topics
         run: |
           git config user.name "qts-topic-bot"
           git config user.email "actions@github.com"
           git add topics.json topics/
           git diff --cached --quiet || git commit -m "Daily topic collection: $(date -u +%Y-%m-%d)"
-          git pull --rebase origin main
-          git push origin main || echo "push failed (possibly nothing to push or a race) — not failing the job"
+          git push || echo "push failed (possibly nothing to push or a race) — not failing the job"
