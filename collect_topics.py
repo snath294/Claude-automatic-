@@ -27,6 +27,7 @@ import os
 import sys
 import time
 from datetime import datetime, timezone
+from urllib.parse import quote
 
 import requests
 
@@ -107,7 +108,7 @@ def collect_hackernews():
         for q in queries:
             url = (
                 "https://hn.algolia.com/api/v1/search_by_date"
-                f"?tags=story&query={requests.utils.quote(q)}&hitsPerPage=6"
+                f"?tags=story&query={quote(q)}&hitsPerPage=6"
             )
             resp = _get_with_retry(url, headers={"Accept": "application/json"})
             for hit in resp.json().get("hits", []):
@@ -211,29 +212,50 @@ def _since_iso(days_ago):
 
 
 def main():
-    collected = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "reddit": collect_reddit(),
-        "hackernews": collect_hackernews(),
-        "google_trends": collect_google_trends(),
-        "youtube": collect_youtube(),
-        "twitter": collect_twitter(),
-    }
+    try:
+        collected = {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "reddit": collect_reddit(),
+            "hackernews": collect_hackernews(),
+            "google_trends": collect_google_trends(),
+            "youtube": collect_youtube(),
+            "twitter": collect_twitter(),
+        }
+    except Exception as e:
+        # Belt-and-suspenders: even if something unexpected slips past the
+        # per-source try/except blocks, never let the whole run crash —
+        # write out whatever we have plus the error, and exit cleanly so
+        # the GitHub Actions job still succeeds and commits the file.
+        import traceback
+
+        traceback.print_exc()
+        collected = {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "reddit": [],
+            "hackernews": [],
+            "google_trends": [],
+            "youtube": [],
+            "twitter": [],
+        }
+        ERRORS["_fatal"] = [f"{type(e).__name__}: {e}"]
+
     if ERRORS:
         collected["_errors"] = ERRORS
 
-    os.makedirs("topics", exist_ok=True)
-    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    try:
+        os.makedirs("topics", exist_ok=True)
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-    with open("topics.json", "w") as f:
-        json.dump(collected, f, indent=2)
+        with open("topics.json", "w") as f:
+            json.dump(collected, f, indent=2)
 
-    with open(f"topics/{date_str}.json", "w") as f:
-        json.dump(collected, f, indent=2)
+        with open(f"topics/{date_str}.json", "w") as f:
+            json.dump(collected, f, indent=2)
+    except Exception as e:
+        print(f"FATAL: could not write output files: {e}", file=sys.stderr)
+        sys.exit(1)
 
-    total = sum(
-        len(v) for k, v in collected.items() if isinstance(v, list)
-    )
+    total = sum(len(v) for k, v in collected.items() if isinstance(v, list))
     print(f"Collected {total} items across sources -> topics.json")
     if ERRORS:
         print(f"Sources with issues: {list(ERRORS.keys())}", file=sys.stderr)
